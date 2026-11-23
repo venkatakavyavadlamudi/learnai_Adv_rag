@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from supabase import create_client
 
 from langchain_core.messages import HumanMessage, AIMessage
@@ -56,7 +56,7 @@ UNKNOWN_ANSWER = "I don't know based on the provided document."
 # Request format
 class ChatRequest(BaseModel):
     question: str
-    chat_history: list = []
+    chat_history: list = Field(default_factory=list)
 
 
 # Verify logged-in user
