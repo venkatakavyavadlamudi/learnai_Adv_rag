@@ -1,5 +1,6 @@
 
 import os
+import logging
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -11,7 +12,11 @@ from src.rag_pipeline import rag_chain
 
 load_dotenv()
 
-app = FastAPI(title="LearnAI RAG API")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="LearnAI Role-Based RAG API")
+
 
 # CORS configuration
 frontend_origins = os.getenv(
@@ -28,66 +33,119 @@ app.add_middleware(
 )
 
 
+# Allowed application roles
+ALLOWED_ROLES = {
+    "Student",
+    "Mentor",
+    "Trainer",
+    "Admin",
+    "Super Admin"
+}
+
+
 # Request model
 class ChatRequest(BaseModel):
     question: str
+    role: str
     chat_history: list = Field(default_factory=list)
+
+
+# Convert frontend chat history into LangChain messages
+def convert_chat_history(chat_history):
+
+    history = []
+
+    for message in chat_history:
+
+        if isinstance(message, str):
+            history.append(
+                HumanMessage(content=message)
+            )
+
+        elif isinstance(message, dict):
+
+            role = message.get("role", "user")
+            content = message.get("content", "")
+
+            if not isinstance(content, str) or not content.strip():
+                continue
+
+            if role in ["user", "human"]:
+                history.append(
+                    HumanMessage(content=content)
+                )
+
+            elif role in ["assistant", "ai"]:
+                history.append(
+                    AIMessage(content=content)
+                )
+
+    return history
 
 
 # Health check
 @app.get("/")
 def home():
     return {
-        "message": "LearnAI RAG API is running"
+        "message": "LearnAI Role-Based RAG API is running"
     }
 
 
-# Chat endpoint without authentication
+# Role-based chatbot endpoint
 @app.post("/chat")
 def chat(request: ChatRequest):
 
     try:
+
+        # Validate question
         if not request.question.strip():
             raise HTTPException(
                 status_code=400,
                 detail="Question cannot be empty"
             )
 
-        # Convert chat history into LangChain messages
-        history = []
+        # Validate role
+        if request.role not in ALLOWED_ROLES:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid role. Allowed roles: Student, Mentor, Trainer, Admin, Super Admin"
+            )
 
-        for message in request.chat_history:
-            if message.get("role") == "user":
-                history.append(
-                    HumanMessage(content=message.get("content", ""))
-                )
+        # Convert chat history
+        history = convert_chat_history(
+            request.chat_history
+        )
 
-            elif message.get("role") == "assistant":
-                history.append(
-                    AIMessage(content=message.get("content", ""))
-                )
+        logger.info("Received role-based chatbot request")
+        logger.info("Selected role: %s", request.role)
+        logger.info("Chat history messages: %s", len(history))
 
-        # Invoke RAG pipeline
+        # Invoke role-based RAG pipeline
         response = rag_chain.invoke({
             "input": request.question,
-            "chat_history": history
+            "chat_history": history,
+            "role": request.role
         })
 
         # Extract answer
         if isinstance(response, dict):
-            answer = response.get("answer", response.get("output", str(response)))
+            answer = response.get(
+                "answer",
+                response.get("output", str(response))
+            )
         else:
             answer = str(response)
 
         return {
-            "answer": answer
+            "answer": answer,
+            "role": request.role
         }
 
     except HTTPException:
         raise
 
-    except Exception as e:
-        print("Chatbot error:", str(e))
+    except Exception:
+        logger.exception("Role-based chatbot processing failed")
 
         raise HTTPException(
             status_code=500,
